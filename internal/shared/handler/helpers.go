@@ -34,6 +34,32 @@ func BindJSON(c *gin.Context, obj any) bool {
 	return true
 }
 
+// BindQuery parses and validates query parameters
+// Returns true if binding succeeded, false if failed (response already sent)
+//
+// Usage:
+//
+//	var req InfiniteScrollRequest
+//	if !handler.BindQuery(c, &req) {
+//	    return
+//	}
+func BindQuery(c *gin.Context, obj any) bool {
+	if err := c.ShouldBindQuery(obj); err != nil {
+		// Add error to context for middleware logging
+		c.Error(err)
+
+		// Check if it's a validation error
+		if resp, ok := validator.ToErrorResponse(err); ok {
+			c.JSON(http.StatusBadRequest, resp)
+		} else {
+			// Query parsing error or other binding errors
+			c.JSON(sharedError.ValidationFailed.Status, sharedError.ValidationFailed)
+		}
+		return false
+	}
+	return true
+}
+
 // RespondError sends an error response with logging
 //
 // Usage:
