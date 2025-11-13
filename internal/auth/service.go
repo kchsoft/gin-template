@@ -35,31 +35,26 @@ func (a *AuthService) Login(ctx context.Context, request *LoginRequest) (*LoginR
 	member, err := a.memberRepository.FindByEmail(ctx, a.db, request.Email)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			log.Warn("로그인 실패 - member email not found", "email", logger.MaskEmail(request.Email))
-			return nil, fmt.Errorf("error %w", ErrInCorrectEmailPassword) // Security: don't reveal if email exists
+			return nil, fmt.Errorf("이메일을 찾을 수 없습니다: email=%s %w", logger.MaskEmail(request.Email), ErrInCorrectEmailPassword) // Security: don't reveal if email exists
 		}
-		log.Error("로그인 실패 - 알 수 없는 오류", "error", err)
-		return nil, fmt.Errorf("로그인 실패: %w", err)
+		return nil, fmt.Errorf("로그인 실패: email=%s %w", logger.MaskEmail(request.Email), err)
 	}
 
 	// 2. Validate password
 	if err := bcrypt.CompareHashAndPassword([]byte(member.Password), []byte(request.Password)); err != nil {
-		log.Warn("로그인 실패 - invalid password", "email", logger.MaskEmail(request.Email))
-		return nil, fmt.Errorf("error %w", ErrInCorrectEmailPassword)
+		return nil, fmt.Errorf("로그인 실패: email=%s %w", logger.MaskEmail(request.Email), ErrInCorrectEmailPassword)
 	}
 
 	// 3. Generate JWT tokens
 	memberID := strconv.FormatUint(uint64(member.ID), 10)
 	accessToken, err := a.tokenManager.GenerateAccessToken(memberID, member.Email)
 	if err != nil {
-		log.Error("access token 생성 실패", "error", err)
-		return nil, fmt.Errorf("generate access token: %w", err)
+		return nil, fmt.Errorf("AccessToken 생성 실패: memberID=%d %w", memberID, err)
 	}
 
 	refreshToken, err := a.tokenManager.GenerateRefreshToken(memberID, member.Email)
 	if err != nil {
-		log.Error("refresh token 생성 실패", "error", err)
-		return nil, fmt.Errorf("generate refresh token: %w", err)
+		return nil, fmt.Errorf("RefreshToken 생성 실패: memberID=%d %w", memberID, err)
 	}
 
 	log.Info("로그인 성공", "email", logger.MaskEmail(request.Email))
@@ -75,24 +70,20 @@ func (a *AuthService) Signup(ctx context.Context, request *SignupRequest) error 
 	return database.WithTransaction(ctx, a.db, func(tx *gorm.DB) error {
 		exists, err := a.memberRepository.IsExist(ctx, tx, request.Email)
 		if err != nil {
-			log.Error("Failed to check member existence", "error", err)
-			return fmt.Errorf("check member existence: %w", err)
+			return fmt.Errorf("회원 존재 확인 오류: email=%s %w", logger.MaskEmail(request.Email), err)
 		}
 		if exists {
-			log.Warn("Member already exists", "email", logger.MaskEmail(request.Email))
-			return fmt.Errorf("error %w", member.ErrMemberAlreadyExists)
+			return fmt.Errorf("이미 존재하는 회원입니다: email=%s %w", logger.MaskEmail(request.Email), member.ErrMemberAlreadyExists)
 		}
 
 		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(request.Password), bcrypt.DefaultCost)
 		if err != nil {
-			log.Error("Failed to hash password", "error", err)
-			return fmt.Errorf("hash password: %w", err)
+			return fmt.Errorf("비밀번호 해싱 실패: %w", err)
 		}
 
 		member := model.NewMember(request.Name, request.Email, request.PhoneNumber, string(hashedPassword))
 		if err := a.memberRepository.Create(ctx, tx, member); err != nil {
-			log.Error("Failed to create member", "error", err)
-			return fmt.Errorf("create member: %w", err)
+			return fmt.Errorf("회원 계정 생성 실패: %w", err)
 		}
 
 		log.Info("Member created successfully", "email", logger.MaskEmail(request.Email))
